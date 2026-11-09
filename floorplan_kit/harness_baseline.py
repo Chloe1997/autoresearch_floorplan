@@ -65,10 +65,17 @@ def make_agent(model=None) -> Agent[State, str]:
         return (WORK / "best_place.py").read_text(encoding="utf-8")
 
     @agent.tool
-    def try_place_py(ctx: RunContext[State], code: str) -> str:
+    def try_place_py(ctx: RunContext[State], code: str = "", **extra) -> str:
         """Save a complete place.py and evaluate it on all dev instances.
         `code` is the full Python source. Returns overall score + per-instance details."""
         st = ctx.deps
+        # small models invent extra args (time_limit=...) or rename `code`: be lenient instead of burning retries
+        if not code:
+            code = next((str(extra[k]) for k in ("file", "content", "source", "place_py", "program") if extra.get(k)), "")
+        if not code.strip():
+            return "No code received. Call try_place_py with code=<the complete place.py source>. Nothing was evaluated."
+        ignored = sorted(k for k in extra if k not in ("file", "content", "source", "place_py", "program"))
+        note = f"(note: ignored extra arguments {ignored}; the time limit is fixed by the evaluator)\n" if ignored else ""
         if st.n_evals >= MAX_EVALS:
             return "EVALUATION BUDGET EXHAUSTED. Stop and summarize."
         v = f"v{len(list(WORK.glob('v*.py'))):03d}"
@@ -90,7 +97,7 @@ def make_agent(model=None) -> Agent[State, str]:
             f.write(json.dumps(rec) + "\n")
         lines = [f'{x["inst"]}: score={x["score"]:.3f} sec={x["sec"]} legalizer_displacement={x["disp"]} {x["msg"][:300]}'
                  for x in r["per_instance"]]
-        return (f"{v} SCORE={r['score']:.4f} (best {st.best:.4f} = {st.best_version}; "
+        return note + (f"{v} SCORE={r['score']:.4f} (best {st.best:.4f} = {st.best_version}; "
                 f"evals {st.n_evals}/{MAX_EVALS})\n" + "\n".join(lines))
 
     @agent.tool
